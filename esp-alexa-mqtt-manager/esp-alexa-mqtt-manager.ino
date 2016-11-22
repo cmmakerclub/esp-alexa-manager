@@ -3,6 +3,7 @@
 #include <WiFiUdp.h>
 #include <functional>
 
+/*    init button for confix wifi   */
 #define BUTTON_INPUT_PIN 13
 CMMC_Manager manager(BUTTON_INPUT_PIN, LED_BUILTIN);
 
@@ -11,6 +12,7 @@ boolean connectUDP();
 void startHttpServer();
 void turnOnRelay();
 void turnOffRelay();
+void doHttpGet();
 
 unsigned int localPort = 1900;      // local port to listen on
 
@@ -28,6 +30,7 @@ String persistent_uuid;
 String device_name;
 
 const int relayPin = 2;
+String light;
 
 void setup() {
   Serial.begin(115200);
@@ -37,11 +40,14 @@ void setup() {
 
   prepareIds();
 
-  // Initialise wifi connection
   Serial.println(String(system_get_sdk_version()));
   pinMode(BUTTON_INPUT_PIN, INPUT_PULLUP);
   pinMode(LED_BUILTIN, OUTPUT);
+
+  // Initialise wifi connection
   manager.start();
+
+  // Initialise udp connection
   udpConnected = connectUDP();
   if (udpConnected) {
     // initialise pins if needed
@@ -50,56 +56,50 @@ void setup() {
 }
 
 void loop() {
-
   HTTP.handleClient();
   delay(1);
 
   // if there's data available, read a packet
   // check if the WiFi and UDP connections were successful
-  if (udpConnected) {
-    // if there’s data available, read a packet
-    int packetSize = UDP.parsePacket();
+  //  if (udpConnected) {
+  // if there’s data available, read a packet
+  int packetSize = UDP.parsePacket();
 
-    if (packetSize) {
-      Serial.println("");
-      Serial.print("Received packet of size ");
-      Serial.println(packetSize);
-      Serial.print("From ");
-      IPAddress remote = UDP.remoteIP();
+  if (packetSize) {
+    Serial.println("");
+    Serial.print("Received packet of size ");
+    Serial.println(packetSize);
+    Serial.print("From ");
+    IPAddress remote = UDP.remoteIP();
 
-      for (int i = 0; i < 4; i++) {
-        Serial.print(remote[i], DEC);
-        if (i < 3) {
-          Serial.print(".");
-        }
-      }
-
-      Serial.print(", port ");
-      Serial.println(UDP.remotePort());
-
-      int len = UDP.read(packetBuffer, 255);
-
-      if (len > 0) {
-        packetBuffer[len] = 0;
-      }
-
-      String request = packetBuffer;
-      //Serial.println("Request:");
-      //Serial.println(request);
-
-      if (request.indexOf('M-SEARCH') > 0) {
-        if (request.indexOf("urn:Belkin:device:**") > 0) {
-          Serial.println("Responding to search request ...");
-          respondToSearch();
-        }
+    for (int i = 0; i < 4; i++) {
+      Serial.print(remote[i], DEC);
+      if (i < 3) {
+        Serial.print(".");
       }
     }
-    delay(10);
-  }
-  else {
-    Serial.println(" Turn on/off to indicate cannot connect ..");
 
+    Serial.print(", port ");
+    Serial.println(UDP.remotePort());
+
+    int len = UDP.read(packetBuffer, 255);
+
+    if (len > 0) {
+      packetBuffer[len] = 0;
+    }
+
+    String request = packetBuffer;
+    //Serial.println("Request:");
+    //Serial.println(request);
+
+    if (request.indexOf('M-SEARCH') > 0) {
+      if (request.indexOf("urn:Belkin:device:**") > 0) {
+        Serial.println("Responding to search request ...");
+        respondToSearch();
+      }
+    }
   }
+  delay(10);
 }
 
 void prepareIds() {
@@ -269,8 +269,40 @@ boolean connectUDP() {
 
 void turnOnRelay() {
   digitalWrite(relayPin, LOW); // turn on relay with voltage HIGH
+  light = "ON";
+  doHttpGet(light);
 }
 
 void turnOffRelay() {
   digitalWrite(relayPin, HIGH);  // turn off relay with voltage LOW
+  light = "OFF";
+  doHttpGet(light);
+}
+
+void doHttpGet(String state) {
+  HTTPClient http;
+  Serial.print("[HTTP] begin...\n");
+
+
+  http.begin("http://www.espert.io/bridge//CMMC/pisiri/command?status=" + String(state)); //HTTP
+
+  // start connection and send HTTP header
+  int httpCode = http.GET();
+
+  // httpCode will be negative on error
+  if (httpCode > 0) {
+    // HTTP header has been send and Server response header has been handled
+    Serial.printf("[HTTP] GET... code: %d\n", httpCode);
+    Serial.print("[CONTENT]\n");
+
+    // file found at server
+    if (httpCode == HTTP_CODE_OK) {
+      String payload = http.getString();
+      Serial.println(payload);
+    }
+  } else {
+    Serial.printf("[HTTP] GET... failed, error: %s\n", http.errorToString(httpCode).c_str());
+  }
+  http.end();
+  delay(2000);
 }
